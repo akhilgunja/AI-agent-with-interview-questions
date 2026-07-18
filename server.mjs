@@ -1,93 +1,71 @@
 import path from 'node:path'
+import fs from 'node:fs'
 import http from 'node:http'
 import Database from 'better-sqlite3'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
+import { sendVerificationEmail } from './mail.mjs'
 
-const questions = [
-  {
-    id: 1,
-    question: 'How would you explain React state updates to a junior developer?',
-    answer: 'Use state to reflect UI data and update it through setter functions; keep state changes predictable and avoid mutating objects directly.',
-    category: 'React',
-    year: 2024,
-  },
-  {
-    id: 2,
-    question: 'What are the main differences between REST and GraphQL APIs?',
-    answer: 'REST uses fixed endpoints and payloads, while GraphQL lets the client request only the fields it needs and is more flexible for evolving frontends.',
-    category: 'API Design',
-    year: 2023,
-  },
-  {
-    id: 3,
-    question: 'How do you optimize a web app for performance in 2024?',
-    answer: 'Use code splitting, lazy loading, image optimization, caching, and measure bottlenecks with browser performance tools.',
-    category: 'Performance',
-    year: 2024,
-  },
-  {
-    id: 4,
-    question: 'What is the difference between useEffect and useLayoutEffect?',
-    answer: 'useEffect runs after paint, while useLayoutEffect runs before paint and is useful for measuring layout or preventing visual flicker.',
-    category: 'React',
-    year: 2022,
-  },
-  {
-    id: 5,
-    question: 'How would you structure a scalable frontend project?',
-    answer: 'Separate routes, components, services, and shared utilities; keep modules focused and use consistent naming and folder conventions.',
-    category: 'Architecture',
-    year: 2021,
-  },
-  {
-    id: 6,
-    question: 'What is the value of TypeScript in a large application?',
-    answer: 'TypeScript catches many bugs early, improves editor support, and makes contracts between components clearer.',
-    category: 'TypeScript',
-    year: 2020,
-  },
-  {
-    id: 7,
-    question: 'How do you handle authentication securely in a frontend app?',
-    answer: 'Use secure HTTP-only cookies or tokens issued by a backend service, keep secrets out of client code, and avoid storing sensitive data in local storage.',
-    category: 'Security',
-    year: 2023,
-  },
-  {
-    id: 8,
-    question: 'How would you improve accessibility in a React interface?',
-    answer: 'Use semantic HTML, keyboard support, labels, contrast, and test with screen readers and accessibility tooling.',
-    category: 'Accessibility',
-    year: 2022,
-  },
-  {
-    id: 9,
-    question: 'What is the purpose of React Suspense?',
-    answer: 'Suspense helps manage asynchronous rendering and lets the UI show fallbacks while data or code is still loading.',
-    category: 'React',
-    year: 2021,
-  },
-  {
-    id: 10,
-    question: 'How do you design error handling for a production web app?',
-    answer: 'Create clear user-facing messages, log failures centrally, retry transient errors carefully, and surface actionable feedback.',
-    category: 'Reliability',
-    year: 2024,
-  },
+const companyList = [
+  'Google', 'Microsoft', 'Amazon', 'Meta', 'Netflix', 'Adobe', 'Salesforce', 'Uber', 'Spotify', 'Stripe',
+  'Dropbox', 'Slack', 'Airbnb', 'Twilio', 'Shopify', 'GitHub', 'Databricks', 'Snowflake', 'MongoDB', 'NVIDIA',
+  'Oracle', 'Intuit', 'Palantir', 'Atlassian', 'LinkedIn', 'IBM', 'Cisco', 'Intel', 'PayPal', 'Tesla',
+  'JPMorgan', 'Goldman Sachs', 'Infosys', 'TCS', 'Accenture', 'Deloitte', 'PwC', 'Capital One', 'DoorDash', 'Coinbase',
+]
+const categoryList = ['React', 'System Design', 'API Design', 'Security', 'Performance', 'Architecture', 'TypeScript', 'Data', 'DevOps', 'Reliability']
+const topicList = [
+  'a scalable frontend architecture',
+  'a resilient API layer',
+  'a low-latency data pipeline',
+  'a secure authentication experience',
+  'a high-throughput observability system',
+  'an event-driven backend platform',
+  'a reliable deployment workflow',
+  'an accessible product experience',
+  'an efficient caching strategy',
+  'a real-time analytics feature',
 ]
 
-const currentYear = new Date().getFullYear()
-const recentQuestions = questions.filter((item) => currentYear - item.year <= 10)
-const dbPath = path.join(process.cwd(), 'data', 'app.sqlite')
+function createQuestionBank() {
+  const bank = []
+  const currentYear = new Date().getFullYear()
+  let nextId = 1
+
+  for (let year = 2015; year <= currentYear; year += 1) {
+    for (let index = 0; index < 10; index += 1) {
+      const company = companyList[(year + index) % companyList.length]
+      const category = categoryList[(year + index) % categoryList.length]
+      const topic = topicList[(year + index) % topicList.length]
+      bank.push({
+        id: nextId,
+        company,
+        question: `How would you design ${topic} for ${company} in ${year}?`,
+        answer: `Start with requirements, highlight trade-offs, show how you would test it, and explain how you would measure success for ${company}'s scale.`,
+        category,
+        year,
+      })
+      nextId += 1
+    }
+  }
+
+  return bank
+}
+
+const questions = createQuestionBank()
+const recentQuestions = questions.slice(-120)
+const dbPath = process.env.DB_PATH ? path.resolve(process.cwd(), process.env.DB_PATH) : path.join(process.cwd(), 'data', 'app.sqlite')
 const jwtSecret = process.env.JWT_SECRET || 'dev-secret'
 
+fs.mkdirSync(path.dirname(dbPath), { recursive: true })
 const db = new Database(dbPath)
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT UNIQUE NOT NULL,
+    email TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
+    email_verified INTEGER NOT NULL DEFAULT 0,
+    verification_code TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -129,18 +107,69 @@ export function createAppServer() {
       req.on('data', (chunk) => {
         body += chunk
       })
-      req.on('end', () => {
+      req.on('end', async () => {
         try {
           const payload = JSON.parse(body || '{}')
-          const passwordHash = bcrypt.hashSync(payload.password, 10)
-          const insert = db.prepare('INSERT INTO users (username, password_hash) VALUES (?, ?)')
-          const result = insert.run(payload.username, passwordHash)
+          const username = String(payload.username || '').trim()
+          const email = String(payload.email || '').trim().toLowerCase()
+          const password = String(payload.password || '')
+          if (!username || !email || password.length < 4) {
+            res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' })
+            res.end(JSON.stringify({ error: 'Username, email, and password are required' }))
+            return
+          }
+
+          const existing = db.prepare('SELECT id FROM users WHERE username = ? OR email = ?').get(username, email)
+          if (existing) {
+            res.writeHead(409, { 'Content-Type': 'application/json; charset=utf-8' })
+            res.end(JSON.stringify({ error: 'Username already exists' }))
+            return
+          }
+
+          const verificationCode = `${Math.floor(100000 + Math.random() * 900000)}`
+          const passwordHash = bcrypt.hashSync(password, 10)
+          const insert = db.prepare('INSERT INTO users (username, email, password_hash, verification_code, email_verified) VALUES (?, ?, ?, ?, 0)')
+          const result = insert.run(username, email, passwordHash, verificationCode)
+          const emailResult = await sendVerificationEmail(email, verificationCode)
           const token = jwt.sign({ userId: result.lastInsertRowid }, jwtSecret)
           res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
-          res.end(JSON.stringify({ user: { id: result.lastInsertRowid, username: payload.username }, token }))
+          res.end(JSON.stringify({
+            user: { id: result.lastInsertRowid, username, email, emailVerified: false },
+            token,
+            requiresVerification: true,
+            verificationCode,
+            emailDelivery: emailResult,
+          }))
         } catch {
           res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' })
           res.end(JSON.stringify({ error: 'Unable to create account' }))
+        }
+      })
+      return
+    }
+
+    if (req.url === '/api/verify' && req.method === 'POST') {
+      let body = ''
+      req.on('data', (chunk) => {
+        body += chunk
+      })
+      req.on('end', () => {
+        try {
+          const payload = JSON.parse(body || '{}')
+          const email = String(payload.email || '').trim().toLowerCase()
+          const code = String(payload.code || '')
+          const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email)
+          if (!user || user.verification_code !== code) {
+            res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' })
+            res.end(JSON.stringify({ error: 'Invalid verification code' }))
+            return
+          }
+          db.prepare('UPDATE users SET email_verified = 1, verification_code = NULL WHERE id = ?').run(user.id)
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+          res.end(JSON.stringify({ user: { id: user.id, username: user.username, email: user.email, emailVerified: true } }))
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' })
+          res.end(JSON.stringify({ error: 'Unable to verify account' }))
         }
       })
       return
@@ -154,15 +183,23 @@ export function createAppServer() {
       req.on('end', () => {
         try {
           const payload = JSON.parse(body || '{}')
-          const user = db.prepare('SELECT * FROM users WHERE username = ?').get(payload.username)
-          if (!user || !bcrypt.compareSync(payload.password, user.password_hash)) {
+          const username = String(payload.username || '').trim()
+          const email = String(payload.email || '').trim().toLowerCase()
+          const password = String(payload.password || '')
+          const user = db.prepare('SELECT * FROM users WHERE username = ? OR email = ?').get(username || email, email || username)
+          if (!user || !bcrypt.compareSync(password, user.password_hash)) {
             res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' })
             res.end(JSON.stringify({ error: 'Invalid credentials' }))
             return
           }
+          if (!user.email_verified) {
+            res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' })
+            res.end(JSON.stringify({ error: 'Please verify your email before signing in' }))
+            return
+          }
           const token = jwt.sign({ userId: user.id }, jwtSecret)
           res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
-          res.end(JSON.stringify({ user: { id: user.id, username: user.username }, token }))
+          res.end(JSON.stringify({ user: { id: user.id, username: user.username, email: user.email, emailVerified: Boolean(user.email_verified) }, token }))
         } catch {
           res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' })
           res.end(JSON.stringify({ error: 'Invalid request' }))
