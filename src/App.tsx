@@ -15,6 +15,7 @@ type InterviewAnswer = {
   id: number
   questionId: number
   answer: string
+  isCorrect?: boolean | null
   createdAt: string
 }
 
@@ -108,7 +109,7 @@ function App() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ questionId: currentQuestion.id, answer: draftAnswer.trim() }),
+        body: JSON.stringify({ questionId: currentQuestion.id, answer: draftAnswer.trim(), isCorrect: null }),
       })
 
       if (!response.ok) {
@@ -129,6 +130,34 @@ function App() {
       setSavedMessage('')
     } finally {
       setSaving(false)
+    }
+  }
+
+  const updateAnswerCorrectness = async (answerId: number, isCorrect: boolean) => {
+    if (!token) {
+      return
+    }
+
+    try {
+      const response = await fetch(`/api/answers/${answerId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ isCorrect }),
+      })
+
+      if (!response.ok) {
+        throw new Error('Unable to update answer status')
+      }
+
+      const updatedEntry = (await response.json()) as InterviewAnswer
+      setAnswers((value) => value.map((item) => (item.id === updatedEntry.id ? { ...item, ...updatedEntry, isCorrect: updatedEntry.isCorrect ?? null } : item)))
+      setSavedMessage(isCorrect ? 'Marked as correct.' : 'Marked as incorrect.')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unexpected error'
+      setError(message)
     }
   }
 
@@ -408,6 +437,15 @@ function App() {
                 <ul className="question-list">
                   {answers.slice(0, 4).map((item) => (
                     <li key={item.id} className="answer-item">
+                      <div className="answer-row">
+                        <span className={`correctness-pill ${item.isCorrect === true ? 'correct' : item.isCorrect === false ? 'incorrect' : 'pending'}`}>
+                          {item.isCorrect === true ? 'Correct' : item.isCorrect === false ? 'Incorrect' : 'Pending'}
+                        </span>
+                        <div className="answer-actions">
+                          <button type="button" className="secondary small" onClick={() => void updateAnswerCorrectness(item.id, true)}>✓</button>
+                          <button type="button" className="secondary small" onClick={() => void updateAnswerCorrectness(item.id, false)}>✕</button>
+                        </div>
+                      </div>
                       <p className="answer-text">{item.answer}</p>
                       <span className="answer-meta">#{item.questionId} • {new Date(item.createdAt).toLocaleDateString()}</span>
                     </li>

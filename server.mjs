@@ -91,10 +91,16 @@ db.exec(`
     user_id INTEGER NOT NULL,
     question_id INTEGER NOT NULL,
     answer TEXT NOT NULL,
+    is_correct INTEGER,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id)
   );
 `)
+
+const answerColumns = db.prepare('PRAGMA table_info(answers)').all().map((column) => column.name)
+if (!answerColumns.includes('is_correct')) {
+  db.exec('ALTER TABLE answers ADD COLUMN is_correct INTEGER')
+}
 
 function getUserIdFromRequest(req) {
   const authHeader = req.headers.authorization || ''
@@ -238,6 +244,7 @@ export function createAppServer() {
       return
     }
 
+    const answerMatch = pathname.match(/^\/api\/answers\/(\d+)$/)
     if (pathname === '/api/answers') {
       const userId = getUserIdFromRequest(req)
       if (!userId) {
@@ -247,7 +254,7 @@ export function createAppServer() {
       }
 
       if (req.method === 'GET') {
-        const answers = db.prepare('SELECT id, question_id AS questionId, answer, created_at AS createdAt FROM answers WHERE user_id = ? ORDER BY id DESC').all(userId)
+        const answers = db.prepare('SELECT id, question_id AS questionId, answer, is_correct AS isCorrect, created_at AS createdAt FROM answers WHERE user_id = ? ORDER BY id DESC').all(userId)
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
         res.end(JSON.stringify(answers))
         return
@@ -261,9 +268,10 @@ export function createAppServer() {
         req.on('end', () => {
           try {
             const payload = JSON.parse(body || '{}')
-            const insert = db.prepare('INSERT INTO answers (user_id, question_id, answer) VALUES (?, ?, ?)')
-            const result = insert.run(userId, payload.questionId, payload.answer)
-            const entry = db.prepare('SELECT id, question_id AS questionId, answer, created_at AS createdAt FROM answers WHERE id = ?').get(result.lastInsertRowid)
+            const isCorrectValue = typeof payload.isCorrect === 'boolean' ? (payload.isCorrect ? 1 : 0) : null
+            const insert = db.prepare('INSERT INTO answers (user_id, question_id, answer, is_correct) VALUES (?, ?, ?, ?)')
+            const result = insert.run(userId, payload.questionId, payload.answer, isCorrectValue)
+            const entry = db.prepare('SELECT id, question_id AS questionId, answer, is_correct AS isCorrect, created_at AS createdAt FROM answers WHERE id = ?').get(result.lastInsertRowid)
             res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
             res.end(JSON.stringify(entry))
           } catch {
@@ -273,6 +281,41 @@ export function createAppServer() {
         })
         return
       }
+    }
+
+    if (answerMatch && req.method === 'PATCH') {
+      const userId = getUserIdFromRequest(req)
+      if (!userId) {
+        res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' })
+        res.end(JSON.stringify({ error: 'Login required' }))
+        return
+      }
+
+      let body = ''
+      req.on('data', (chunk) => {
+        body += chunk
+      })
+      req.on('end', () => {
+        try {
+          const payload = JSON.parse(body || '{}')
+          const isCorrectValue = typeof payload.isCorrect === 'boolean' ? (payload.isCorrect ? 1 : 0) : null
+          const answerId = Number(answerMatch[1])
+          const existing = db.prepare('SELECT id FROM answers WHERE id = ? AND user_id = ?').get(answerId, userId)
+          if (!existing) {
+            res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' })
+            res.end(JSON.stringify({ error: 'Answer not found' }))
+            return
+          }
+          db.prepare('UPDATE answers SET is_correct = ? WHERE id = ? AND user_id = ?').run(isCorrectValue, answerId, userId)
+          const entry = db.prepare('SELECT id, question_id AS questionId, answer, is_correct AS isCorrect, created_at AS createdAt FROM answers WHERE id = ?').get(answerId)
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+          res.end(JSON.stringify(entry))
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' })
+          res.end(JSON.stringify({ error: 'Invalid payload' }))
+        }
+      })
+      return
     }
 
     if (pathname === '/api/health') {
