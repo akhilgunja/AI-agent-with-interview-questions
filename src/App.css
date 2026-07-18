@@ -1,0 +1,139 @@
+.app-shell {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 2rem 1.25rem 3rem;
+  display: grid;
+  gap: 1.25rem;
+}
+
+.panel {
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(15, 23, 42, 0.74);
+  border-radius: 24px;
+  padding: 1.4rem;
+  box-shadow: 0 20px 45px rgba(2, 8, 23, 0.4);
+}
+
+.hero-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.3em;
+  font-size: 0.8rem;
+  color: #93c5fd;
+}
+
+.lead {
+  color: #cbd5e1;
+  max-width: 640px;
+}
+
+button {
+  width: fit-content;
+  padding: 0.8rem 1.15rem;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #38bdf8, #818cf8);
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:hover {
+  filter: brightness(1.08);
+}
+
+.status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  color: #e2e8f0;
+  font-size: 0.95rem;
+}
+
+.error-badge {
+  color: #fda4af;
+  font-weight: 600;
+}
+
+.interview-box {
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 18px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  background: rgba(2, 8, 23, 0.48);
+}
+
+.progress {
+  font-size: 0.85rem;
+  color: #93c5fd;
+  margin-bottom: 0.7rem;
+}
+
+textarea {
+  width: 100%;
+  min-height: 110px;
+  margin: 0.9rem 0;
+  padding: 0.85rem;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.85);
+  color: #f8fafc;
+}
+
+.sample-answer {
+  color: #cbd5e1;
+  margin-top: 0.65rem;
+  margin-bottom: 0.2rem;
+}
+
+.answer-summary {
+  margin-bottom: 1rem;
+  color: #e2e8f0;
+}
+
+.question-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 1rem;
+}
+
+.question-card {
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 18px;
+  padding: 1rem;
+  background: rgba(15, 23, 42, 0.6);
+}
+
+.meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.85rem;
+  margin-bottom: 0.6rem;
+  color: #93c5fd;
+}
+
+.category {
+  text-transform: uppercase;
+  letter-spacing: 0.24em;
+}
+
+.question-card h2 {
+  margin: 0 0 0.4rem;
+  font-size: 1.1rem;
+  color: #f8fafc;
+}
+
+.question-card p {
+  margin: 0;
+  color: #cbd5e1;
+}
