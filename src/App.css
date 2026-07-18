@@ -186,6 +186,47 @@ textarea {
   font-weight: 600;
 }
 
+.score-summary {
+  display: grid;
+  gap: 0.6rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0.75rem 0 1rem;
+}
+
+.score-pill {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.7rem 0.8rem;
+  border-radius: 14px;
+  border: 1px solid rgba(45, 212, 191, 0.18);
+  background: rgba(15, 23, 42, 0.7);
+}
+
+.score-pill span {
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.19em;
+  color: #67e8f9;
+}
+
+.score-pill strong {
+  color: #f8fafc;
+  font-size: 1.2rem;
+}
+
+.score-pill.correct strong {
+  color: #86efac;
+}
+
+.score-pill.incorrect strong {
+  color: #fda4af;
+}
+
+.score-pill.pending strong {
+  color: #f8fafc;
+}
+
 .answer-summary h3,
 .category-panel h3 {
   margin: 0 0 0.4rem;

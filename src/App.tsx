@@ -46,6 +46,20 @@ function App() {
 
   const currentQuestion = questions[currentIndex]
   const answeredCount = useMemo(() => answers.length, [answers])
+  const scoreSummary = useMemo(() => {
+    const counts = answers.reduce((accumulator, answer) => {
+      if (answer.isCorrect === true) {
+        accumulator.correct += 1
+      } else if (answer.isCorrect === false) {
+        accumulator.incorrect += 1
+      } else {
+        accumulator.pending += 1
+      }
+      return accumulator
+    }, { correct: 0, incorrect: 0, pending: 0 })
+
+    return counts
+  }, [answers])
   const categories = useMemo(() => {
     const counts = questions.reduce<Record<string, number>>((accumulator, question) => {
       accumulator[question.category] = (accumulator[question.category] || 0) + 1
@@ -433,6 +447,20 @@ function App() {
                 <div className="answer-summary">
                   <h3>Saved answers</h3>
                   <p>{answeredCount} answer{answeredCount === 1 ? '' : 's'} stored in the database</p>
+                </div>
+                <div className="score-summary">
+                  <div className="score-pill correct">
+                    <span>Correct</span>
+                    <strong>{scoreSummary.correct}</strong>
+                  </div>
+                  <div className="score-pill incorrect">
+                    <span>Incorrect</span>
+                    <strong>{scoreSummary.incorrect}</strong>
+                  </div>
+                  <div className="score-pill pending">
+                    <span>Pending</span>
+                    <strong>{scoreSummary.pending}</strong>
+                  </div>
                 </div>
                 <ul className="question-list">
                   {answers.slice(0, 4).map((item) => (
