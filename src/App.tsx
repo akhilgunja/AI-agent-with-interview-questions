@@ -141,7 +141,7 @@ function App() {
         : await register(username, email, password)
       if (authResponse.requiresVerification) {
         setRequiresVerification(true)
-        setSavedMessage('Account created. Verify the email with the code returned by the server.')
+        setSavedMessage('Account created. Enter the verification code we sent back to your email.')
         setError(null)
         setStatus('Verification required')
         return
@@ -178,9 +178,18 @@ function App() {
 
   const handleVerify = async () => {
     try {
-      await verifyEmail(email, verificationCode)
+      const verified = await verifyEmail(email, verificationCode)
       setStatus('Email verified successfully')
       setSavedMessage('Email verified. You can sign in now.')
+      setRequiresVerification(false)
+      if (verified.token) {
+        window.localStorage.setItem('interview-token', verified.token)
+        window.localStorage.setItem('interview-username', verified.user.username)
+        setToken(verified.token)
+        setIsAuthenticated(true)
+        setStatus(`Signed in as ${verified.user.username}`)
+        await loadAnswers(verified.token)
+      }
       setError(null)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unexpected error'
@@ -323,6 +332,7 @@ function App() {
               <input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Username" />
               <input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="Email" type="email" />
               <input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Password" type="password" />
+              <p className="saved-message">Use the same email you registered with when verifying your account.</p>
               {requiresVerification ? (
                 <>
                   <input value={verificationCode} onChange={(event) => setVerificationCode(event.target.value)} placeholder="Verification code" />

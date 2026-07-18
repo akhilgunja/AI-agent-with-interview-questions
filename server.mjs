@@ -4,6 +4,7 @@ import http from 'node:http'
 import Database from 'better-sqlite3'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
+import { fileURLToPath } from 'node:url'
 import { sendVerificationEmail } from './mail.mjs'
 
 const companyList = [
@@ -26,32 +27,32 @@ const topicList = [
   'a real-time analytics feature',
 ]
 
-function createQuestionBank() {
+function createQuestionBank(size = 10000) {
   const bank = []
   const currentYear = new Date().getFullYear()
   let nextId = 1
 
-  for (let year = 2015; year <= currentYear; year += 1) {
-    for (let index = 0; index < 10; index += 1) {
-      const company = companyList[(year + index) % companyList.length]
-      const category = categoryList[(year + index) % categoryList.length]
-      const topic = topicList[(year + index) % topicList.length]
-      bank.push({
-        id: nextId,
-        company,
-        question: `How would you design ${topic} for ${company} in ${year}?`,
-        answer: `Start with requirements, highlight trade-offs, show how you would test it, and explain how you would measure success for ${company}'s scale.`,
-        category,
-        year,
-      })
-      nextId += 1
-    }
+  for (let index = 0; index < size; index += 1) {
+    const year = 2015 + (index % 12)
+    const company = companyList[index % companyList.length]
+    const category = categoryList[(index + 3) % categoryList.length]
+    const topic = topicList[index % topicList.length]
+    const normalizedYear = Math.min(year, currentYear)
+    bank.push({
+      id: nextId,
+      company,
+      question: `How would you design ${topic} for ${company} in ${normalizedYear}?`,
+      answer: `Start with requirements, highlight trade-offs, show how you would test it, and explain how you would measure success for ${company}'s scale.`,
+      category,
+      year: normalizedYear,
+    })
+    nextId += 1
   }
 
   return bank
 }
 
-const questions = createQuestionBank()
+const questions = createQuestionBank(10000)
 const recentQuestions = questions.slice(-120)
 const dbPath = process.env.DB_PATH ? path.resolve(process.cwd(), process.env.DB_PATH) : path.join(process.cwd(), 'data', 'app.sqlite')
 const jwtSecret = process.env.JWT_SECRET || 'dev-secret'
@@ -94,15 +95,24 @@ function getUserIdFromRequest(req) {
   }
 }
 
+function getRequestPath(url) {
+  if (!url) {
+    return ''
+  }
+  const parsed = new URL(url, 'http://127.0.0.1')
+  return parsed.pathname
+}
+
 export function createAppServer() {
   return http.createServer((req, res) => {
-    if (req.url === '/api/questions') {
+    const pathname = getRequestPath(req.url)
+    if (pathname === '/api/questions') {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
-      res.end(JSON.stringify(recentQuestions))
+      res.end(JSON.stringify(questions))
       return
     }
 
-    if (req.url === '/api/register' && req.method === 'POST') {
+    if (pathname === '/api/register' && req.method === 'POST') {
       let body = ''
       req.on('data', (chunk) => {
         body += chunk
@@ -148,7 +158,7 @@ export function createAppServer() {
       return
     }
 
-    if (req.url === '/api/verify' && req.method === 'POST') {
+    if (pathname === '/api/verify' && req.method === 'POST') {
       let body = ''
       req.on('data', (chunk) => {
         body += chunk
@@ -165,8 +175,12 @@ export function createAppServer() {
             return
           }
           db.prepare('UPDATE users SET email_verified = 1, verification_code = NULL WHERE id = ?').run(user.id)
+          const token = jwt.sign({ userId: user.id }, jwtSecret)
           res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
-          res.end(JSON.stringify({ user: { id: user.id, username: user.username, email: user.email, emailVerified: true } }))
+          res.end(JSON.stringify({
+            user: { id: user.id, username: user.username, email: user.email, emailVerified: true },
+            token,
+          }))
         } catch {
           res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' })
           res.end(JSON.stringify({ error: 'Unable to verify account' }))
@@ -175,7 +189,7 @@ export function createAppServer() {
       return
     }
 
-    if (req.url === '/api/login' && req.method === 'POST') {
+    if (pathname === '/api/login' && req.method === 'POST') {
       let body = ''
       req.on('data', (chunk) => {
         body += chunk
@@ -208,7 +222,7 @@ export function createAppServer() {
       return
     }
 
-    if (req.url === '/api/answers') {
+    if (pathname === '/api/answers') {
       const userId = getUserIdFromRequest(req)
       if (!userId) {
         res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' })
@@ -245,7 +259,7 @@ export function createAppServer() {
       }
     }
 
-    if (req.url === '/api/health') {
+    if (pathname === '/api/health') {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
       res.end(JSON.stringify({ status: 'ok', count: recentQuestions.length }))
       return
@@ -256,9 +270,11 @@ export function createAppServer() {
   })
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.meta.url.replace('file://', ''))) {
+const currentFile = fileURLToPath(import.meta.url)
+if (process.argv[1] && path.resolve(process.argv[1]) === currentFile) {
   const server = createAppServer()
-  server.listen(3001, '127.0.0.1', () => {
-    console.log('API server listening on http://127.0.0.1:3001')
+  const port = Number(process.env.PORT || 3001)
+  server.listen(port, '127.0.0.1', () => {
+    console.log(`API server listening on http://127.0.0.1:${port}`)
   })
 }

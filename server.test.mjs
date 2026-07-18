@@ -2,9 +2,47 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import fs from 'node:fs'
+import { spawn } from 'node:child_process'
 
 process.env.DB_PATH = path.join(process.cwd(), 'data', `server-test-${process.pid}-${Date.now()}.sqlite`)
 const { createAppServer } = await import('./server.mjs')
+
+test('node server.mjs starts the API server and serves /api/health', async () => {
+  const child = spawn(process.execPath, ['server.mjs'], {
+    cwd: process.cwd(),
+    env: { ...process.env, PORT: '3101' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+
+  let stdout = ''
+  let stderr = ''
+  child.stdout.on('data', (chunk) => {
+    stdout += chunk.toString()
+  })
+  child.stderr.on('data', (chunk) => {
+    stderr += chunk.toString()
+  })
+
+  try {
+    let lastError
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      try {
+        const response = await fetch('http://127.0.0.1:3101/api/health')
+        if (response.ok) {
+          const payload = await response.json()
+          assert.equal(payload.status, 'ok')
+          return
+        }
+      } catch (error) {
+        lastError = error
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250))
+    }
+    throw lastError || new Error(`Server did not start. Stdout: ${stdout}\nStderr: ${stderr}`)
+  } finally {
+    child.kill('SIGTERM')
+  }
+})
 
 test('GET /api/questions returns questions and POST /api/answers persists answers', async () => {
   const dbPath = process.env.DB_PATH
@@ -132,6 +170,17 @@ test('POST /api/verify completes email verification for a new account', async ()
     assert.equal(verifyResponse.status, 200)
     const verified = await verifyResponse.json()
     assert.equal(verified.user.emailVerified, true)
+    assert.ok(verified.token)
+
+    const loginResponse = await fetch(`http://127.0.0.1:${port}/api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'verified', password: 'secret123' }),
+    })
+    assert.equal(loginResponse.status, 200)
+    const signedIn = await loginResponse.json()
+    assert.equal(signedIn.user.username, 'verified')
+    assert.ok(signedIn.token)
   } finally {
     await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))
   }
