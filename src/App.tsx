@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { login, register } from './auth'
 import './App.css'
 
 type Question = {
@@ -10,8 +11,10 @@ type Question = {
 }
 
 type InterviewAnswer = {
+  id: number
   questionId: number
   answer: string
+  createdAt: string
 }
 
 function App() {
@@ -21,6 +24,12 @@ function App() {
   const [currentIndex, setCurrentIndex] = useState(0)
   const [answers, setAnswers] = useState<InterviewAnswer[]>([])
   const [draftAnswer, setDraftAnswer] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [savedMessage, setSavedMessage] = useState('')
+  const [token, setToken] = useState<string | null>(null)
+  const [mode, setMode] = useState<'login' | 'register'>('login')
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
 
   const currentQuestion = questions[currentIndex]
   const answeredCount = useMemo(() => answers.length, [answers])
@@ -45,18 +54,76 @@ function App() {
     }
   }
 
-  const saveAnswer = () => {
-    if (!currentQuestion) {
+  const loadAnswers = async (authToken: string) => {
+    try {
+      const response = await fetch('/api/answers', {
+        headers: { Authorization: `Bearer ${authToken}` },
+      })
+      if (!response.ok) {
+        throw new Error('Unable to load saved answers')
+      }
+      const data = (await response.json()) as InterviewAnswer[]
+      setAnswers(data)
+    } catch {
+      setStatus('Saved answers unavailable')
+    }
+  }
+
+  const saveAnswer = async () => {
+    if (!currentQuestion || !draftAnswer.trim()) {
+      setSavedMessage('Please write an answer before saving.')
+      return
+    }
+    if (!token) {
+      setSavedMessage('Please sign in first.')
       return
     }
 
-    const nextAnswers = answers.filter((entry) => entry.questionId !== currentQuestion.id)
-    nextAnswers.push({ questionId: currentQuestion.id, answer: draftAnswer.trim() })
-    setAnswers(nextAnswers)
-    setDraftAnswer('')
+    setSaving(true)
+    setSavedMessage('')
 
-    if (currentIndex < questions.length - 1) {
-      setCurrentIndex((value) => value + 1)
+    try {
+      const response = await fetch('/api/answers', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ questionId: currentQuestion.id, answer: draftAnswer.trim() }),
+      })
+
+      if (!response.ok) {
+        throw new Error('Unable to save answer')
+      }
+
+      const nextEntry = (await response.json()) as InterviewAnswer
+      setAnswers((value) => [...value, nextEntry])
+      setDraftAnswer('')
+      setSavedMessage('Answer saved to the database.')
+      if (currentIndex < questions.length - 1) {
+        setCurrentIndex((value) => value + 1)
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unexpected error'
+      setError(message)
+      setSavedMessage('')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleAuth = async () => {
+    try {
+      const authResponse = mode === 'login'
+        ? await login(username, password)
+        : await register(username, password)
+      setToken(authResponse.token)
+      setError(null)
+      setStatus(`Signed in as ${authResponse.user.username}`)
+      await loadAnswers(authResponse.token)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unexpected error'
+      setError(message)
     }
   }
 
@@ -70,7 +137,7 @@ function App() {
         <p className="eyebrow">Frontend + backend demo</p>
         <h1>Interview Question Studio</h1>
         <p className="lead">
-          These questions come from the last 10 years and you can also answer them as part of a mini interview session.
+          These questions come from the last 10 years and you can save your interview answers in a real SQLite database.
         </p>
         <button type="button" onClick={() => void loadQuestions()}>
           Refresh questions
@@ -81,6 +148,22 @@ function App() {
         <div className="status-row">
           <span>{status}</span>
           {error ? <span className="error-badge">{error}</span> : null}
+        </div>
+
+        <div className="auth-box">
+          <div className="auth-switch">
+            <button type="button" className={mode === 'login' ? 'active' : ''} onClick={() => setMode('login')}>
+              Login
+            </button>
+            <button type="button" className={mode === 'register' ? 'active' : ''} onClick={() => setMode('register')}>
+              Register
+            </button>
+          </div>
+          <input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Username" />
+          <input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Password" type="password" />
+          <button type="button" onClick={() => void handleAuth()}>
+            {mode === 'login' ? 'Sign in' : 'Create account'}
+          </button>
         </div>
 
         <div className="interview-box">
@@ -98,9 +181,10 @@ function App() {
                 onChange={(event) => setDraftAnswer(event.target.value)}
                 placeholder="Type your interview answer here..."
               />
-              <button type="button" onClick={saveAnswer}>
-                Save answer
+              <button type="button" onClick={() => void saveAnswer()} disabled={saving || !token}>
+                {saving ? 'Saving...' : 'Save answer'}
               </button>
+              {savedMessage ? <p className="saved-message">{savedMessage}</p> : null}
             </>
           ) : (
             <p>No questions loaded yet.</p>

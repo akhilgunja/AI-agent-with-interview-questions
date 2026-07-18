@@ -1,4 +1,8 @@
+import path from 'node:path'
 import http from 'node:http'
+import Database from 'better-sqlite3'
+import bcrypt from 'bcryptjs'
+import jwt from 'jsonwebtoken'
 
 const questions = [
   {
@@ -75,24 +79,149 @@ const questions = [
 
 const currentYear = new Date().getFullYear()
 const recentQuestions = questions.filter((item) => currentYear - item.year <= 10)
+const dbPath = path.join(process.cwd(), 'data', 'app.sqlite')
+const jwtSecret = process.env.JWT_SECRET || 'dev-secret'
 
-const server = http.createServer((req, res) => {
-  if (req.url === '/api/questions') {
-    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
-    res.end(JSON.stringify(recentQuestions))
-    return
+const db = new Database(dbPath)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS answers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    question_id INTEGER NOT NULL,
+    answer TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  );
+`)
+
+function getUserIdFromRequest(req) {
+  const authHeader = req.headers.authorization || ''
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : ''
+  if (!token) {
+    return null
   }
 
-  if (req.url === '/api/health') {
-    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
-    res.end(JSON.stringify({ status: 'ok', count: recentQuestions.length }))
-    return
+  try {
+    const payload = jwt.verify(token, jwtSecret)
+    return payload.userId ?? null
+  } catch {
+    return null
   }
+}
 
-  res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' })
-  res.end(JSON.stringify({ error: 'Not found' }))
-})
+export function createAppServer() {
+  return http.createServer((req, res) => {
+    if (req.url === '/api/questions') {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+      res.end(JSON.stringify(recentQuestions))
+      return
+    }
 
-server.listen(3001, '127.0.0.1', () => {
-  console.log('API server listening on http://127.0.0.1:3001')
-})
+    if (req.url === '/api/register' && req.method === 'POST') {
+      let body = ''
+      req.on('data', (chunk) => {
+        body += chunk
+      })
+      req.on('end', () => {
+        try {
+          const payload = JSON.parse(body || '{}')
+          const passwordHash = bcrypt.hashSync(payload.password, 10)
+          const insert = db.prepare('INSERT INTO users (username, password_hash) VALUES (?, ?)')
+          const result = insert.run(payload.username, passwordHash)
+          const token = jwt.sign({ userId: result.lastInsertRowid }, jwtSecret)
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+          res.end(JSON.stringify({ user: { id: result.lastInsertRowid, username: payload.username }, token }))
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' })
+          res.end(JSON.stringify({ error: 'Unable to create account' }))
+        }
+      })
+      return
+    }
+
+    if (req.url === '/api/login' && req.method === 'POST') {
+      let body = ''
+      req.on('data', (chunk) => {
+        body += chunk
+      })
+      req.on('end', () => {
+        try {
+          const payload = JSON.parse(body || '{}')
+          const user = db.prepare('SELECT * FROM users WHERE username = ?').get(payload.username)
+          if (!user || !bcrypt.compareSync(payload.password, user.password_hash)) {
+            res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' })
+            res.end(JSON.stringify({ error: 'Invalid credentials' }))
+            return
+          }
+          const token = jwt.sign({ userId: user.id }, jwtSecret)
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+          res.end(JSON.stringify({ user: { id: user.id, username: user.username }, token }))
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' })
+          res.end(JSON.stringify({ error: 'Invalid request' }))
+        }
+      })
+      return
+    }
+
+    if (req.url === '/api/answers') {
+      const userId = getUserIdFromRequest(req)
+      if (!userId) {
+        res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' })
+        res.end(JSON.stringify({ error: 'Login required' }))
+        return
+      }
+
+      if (req.method === 'GET') {
+        const answers = db.prepare('SELECT id, question_id AS questionId, answer, created_at AS createdAt FROM answers WHERE user_id = ? ORDER BY id DESC').all(userId)
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+        res.end(JSON.stringify(answers))
+        return
+      }
+
+      if (req.method === 'POST') {
+        let body = ''
+        req.on('data', (chunk) => {
+          body += chunk
+        })
+        req.on('end', () => {
+          try {
+            const payload = JSON.parse(body || '{}')
+            const insert = db.prepare('INSERT INTO answers (user_id, question_id, answer) VALUES (?, ?, ?)')
+            const result = insert.run(userId, payload.questionId, payload.answer)
+            const entry = db.prepare('SELECT id, question_id AS questionId, answer, created_at AS createdAt FROM answers WHERE id = ?').get(result.lastInsertRowid)
+            res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+            res.end(JSON.stringify(entry))
+          } catch {
+            res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' })
+            res.end(JSON.stringify({ error: 'Invalid payload' }))
+          }
+        })
+        return
+      }
+    }
+
+    if (req.url === '/api/health') {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+      res.end(JSON.stringify({ status: 'ok', count: recentQuestions.length }))
+      return
+    }
+
+    res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' })
+    res.end(JSON.stringify({ error: 'Not found' }))
+  })
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.meta.url.replace('file://', ''))) {
+  const server = createAppServer()
+  server.listen(3001, '127.0.0.1', () => {
+    console.log('API server listening on http://127.0.0.1:3001')
+  })
+}
