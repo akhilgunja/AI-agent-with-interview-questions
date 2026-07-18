@@ -3,9 +3,44 @@ import assert from 'node:assert/strict'
 import path from 'node:path'
 import fs from 'node:fs'
 import { spawn } from 'node:child_process'
+import Database from 'better-sqlite3'
 
 process.env.DB_PATH = path.join(process.cwd(), 'data', `server-test-${process.pid}-${Date.now()}.sqlite`)
 const { createAppServer } = await import('./server.mjs')
+
+test('legacy SQLite users tables are upgraded for verification support', async () => {
+  const legacyDbPath = path.join(process.cwd(), 'data', `server-test-${process.pid}-${Date.now()}-legacy.sqlite`)
+  const legacyDb = new Database(legacyDbPath)
+  legacyDb.exec(`
+    CREATE TABLE users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `)
+  legacyDb.close()
+
+  process.env.DB_PATH = legacyDbPath
+  const server = createAppServer()
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+
+  const address = server.address()
+  const port = typeof address === 'object' && address ? address.port : 0
+
+  try {
+    const registerResponse = await fetch(`http://127.0.0.1:${port}/api/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'legacy', email: 'legacy@example.com', password: 'secret123' }),
+    })
+    assert.equal(registerResponse.status, 200)
+    const payload = await registerResponse.json()
+    assert.equal(payload.requiresVerification, true)
+  } finally {
+    await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))
+  }
+})
 
 test('node server.mjs starts the API server and serves /api/health', async () => {
   const child = spawn(process.execPath, ['server.mjs'], {

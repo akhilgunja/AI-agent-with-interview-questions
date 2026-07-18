@@ -59,17 +59,33 @@ const jwtSecret = process.env.JWT_SECRET || 'dev-secret'
 
 fs.mkdirSync(path.dirname(dbPath), { recursive: true })
 const db = new Database(dbPath)
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT UNIQUE NOT NULL,
-    email TEXT UNIQUE NOT NULL,
-    password_hash TEXT NOT NULL,
-    email_verified INTEGER NOT NULL DEFAULT 0,
-    verification_code TEXT,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  );
+const tableInfo = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'users'").get()
+if (!tableInfo) {
+  db.exec(`
+    CREATE TABLE users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT UNIQUE NOT NULL,
+      email TEXT UNIQUE,
+      password_hash TEXT NOT NULL,
+      email_verified INTEGER NOT NULL DEFAULT 0,
+      verification_code TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `)
+} else {
+  const columns = db.prepare('PRAGMA table_info(users)').all().map((column) => column.name)
+  if (!columns.includes('email')) {
+    db.exec('ALTER TABLE users ADD COLUMN email TEXT')
+  }
+  if (!columns.includes('email_verified')) {
+    db.exec('ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0')
+  }
+  if (!columns.includes('verification_code')) {
+    db.exec('ALTER TABLE users ADD COLUMN verification_code TEXT')
+  }
+}
 
+db.exec(`
   CREATE TABLE IF NOT EXISTS answers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
